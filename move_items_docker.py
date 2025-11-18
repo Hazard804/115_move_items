@@ -224,14 +224,24 @@ def init_client_from_env():
         logger.info("正在验证Cookie...")
         client = P115Client(cookie_env)
         
-        # 测试连接
-        dir_count = 0
-        for dir_info in iter_dirs(client=client, cid=0, max_workers=0):
-            dir_count += 1
-            if dir_count >= 3:
-                break
-        
-        logger.info(f"✓ Cookie验证成功！在根目录找到 {dir_count} 个文件夹")
+        # 测试连接 - 尝试获取用户信息（更快更可靠）
+        try:
+            logger.info("正在测试API连接...")
+            # 使用更简单的API测试连接
+            user_info = client.user_info()
+            if user_info and user_info.get('state'):
+                user_name = user_info.get('data', {}).get('user_name', '未知用户')
+                logger.info(f"✓ Cookie验证成功！当前用户: {user_name}")
+            else:
+                logger.error("✗ Cookie验证失败: 无法获取用户信息")
+                return None
+        except Exception as e:
+            logger.error(f"✗ 连接115 API失败: {e}")
+            logger.error("可能原因:")
+            logger.error("  1. 网络连接问题，无法访问 115.com")
+            logger.error("  2. Cookie 已过期或格式错误")
+            logger.error("  3. 被防火墙或代理拦截")
+            return None
         
         # 保存cookie到文件（用于下次重启）
         os.makedirs(DATA_DIR, exist_ok=True)
