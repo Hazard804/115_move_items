@@ -80,25 +80,40 @@ def parse_path_mappings(mappings_str):
     mappings = []
     pairs = mappings_str.split(',')
     
-    for pair in pairs:
+    for idx, pair in enumerate(pairs, 1):
         pair = pair.strip()
+        if not pair:
+            continue
+            
         if '->' not in pair:
-            logger.warning(f"忽略无效的映射配置: {pair}")
+            logger.warning(f"⚠️  映射 {idx}: 格式错误（缺少 '->'）: {pair}")
+            logger.warning(f"    正确格式: /源路径->/目标路径")
             continue
         
         parts = pair.split('->', 1)
         if len(parts) != 2:
-            logger.warning(f"忽略无效的映射配置: {pair}")
+            logger.warning(f"⚠️  映射 {idx}: 格式错误: {pair}")
             continue
         
         source = parts[0].strip()
         target = parts[1].strip()
         
         if not source or not target:
-            logger.warning(f"忽略空路径的映射: {pair}")
+            logger.warning(f"⚠️  映射 {idx}: 路径不能为空: {pair}")
             continue
         
+        if not source.startswith('/'):
+            logger.warning(f"⚠️  映射 {idx}: 源路径必须以 '/' 开头: {source}")
+            logger.warning(f"    已自动修正为: /{source}")
+            source = '/' + source
+        
+        if not target.startswith('/'):
+            logger.warning(f"⚠️  映射 {idx}: 目标路径必须以 '/' 开头: {target}")
+            logger.warning(f"    已自动修正为: /{target}")
+            target = '/' + target
+        
         mappings.append((source, target))
+        logger.info(f"✓ 映射 {idx}: {source} -> {target}")
     
     return mappings
 
@@ -129,6 +144,9 @@ def parse_exclude_extensions(extensions_str):
             ext = '.' + ext
         
         extensions.add(ext)
+    
+    if extensions:
+        logger.info(f"📋 已配置排除后缀: {', '.join(sorted(extensions))}")
     
     return extensions
 
@@ -237,23 +255,27 @@ def find_directory_by_path(path, start_cid=0):
     
     # 逐层查找
     for i, folder_name in enumerate(path_parts):
-        logger.info(f"正在查找: {folder_name} (当前目录ID: {current_cid})")
+        current_path = '/' + '/'.join(path_parts[:i+1])
+        logger.info(f"  🔍 查找: {current_path}")
         
         # 获取当前目录下的所有子目录
         found = False
-        for dir_info in iter_dirs(client=client, cid=current_cid, max_workers=0):
-            if dir_info.get('name') == folder_name:
-                current_cid = dir_info.get('id')
-                found = True
-                logger.info(f"  ✓ 找到: {folder_name} (ID: {current_cid})")
-                break
+        try:
+            for dir_info in iter_dirs(client=client, cid=current_cid, max_workers=0):
+                if dir_info.get('name') == folder_name:
+                    current_cid = dir_info.get('id')
+                    found = True
+                    logger.info(f"     ✓ 找到 (ID: {current_cid})")
+                    break
+        except Exception as e:
+            logger.error(f"     ✗ 查询目录时出错: {e}")
+            return None
         
         if not found:
-            logger.error(f"  ✗ 未找到目录: {folder_name}")
-            logger.error(f"  提示: 在目录 {current_cid} 下找不到名为 '{folder_name}' 的子目录")
+            logger.error(f"     ✗ 未找到目录: {folder_name}")
+            logger.error(f"     提示: 请检查路径是否正确（区分大小写）")
             return None
     
-    logger.info(f"✓ 成功找到目标目录 ID: {current_cid}")
     return current_cid
 
 
@@ -286,7 +308,7 @@ def init_client_from_env():
     global client
     
     logger.info("=" * 80)
-    logger.info("115网盘客户端初始化 (Docker模式)")
+    logger.info("🔐 115网盘客户端初始化")
     logger.info("=" * 80)
     
     # 从环境变量读取cookie
@@ -295,53 +317,91 @@ def init_client_from_env():
     if not cookie_env:
         # 尝试从文件读取
         if os.path.exists(COOKIE_FILE):
-            logger.info(f"从文件读取Cookie: {COOKIE_FILE}")
+            logger.info(f"📂 从文件读取Cookie: {COOKIE_FILE}")
             try:
                 with open(COOKIE_FILE, 'r', encoding='utf-8') as f:
                     cookie_env = f.read().strip()
+                logger.info("✓ Cookie 读取成功")
             except Exception as e:
-                logger.error(f"读取Cookie文件失败: {e}")
+                logger.error(f"✗ 读取Cookie文件失败: {e}")
                 return None
     
     if not cookie_env:
-        logger.error("错误: 未设置COOKIE环境变量，且未找到cookie文件")
-        logger.error("请通过 -e COOKIE='your_cookie' 设置cookie")
+        logger.error("=" * 80)
+        logger.error("❌ 错误: 未设置 COOKIE 环境变量")
+        logger.error("=" * 80)
+        logger.error("")
+        logger.error("请通过以下方式设置 Cookie:")
+        logger.error("  docker run -e COOKIE='你的Cookie' ...")
+        logger.error("")
+        logger.error("如何获取 Cookie:")
+        logger.error("  1. 访问 https://115.com 并登录")
+        logger.error("  2. 按 F12 打开开发者工具")
+        logger.error("  3. 切换到 Network 标签")
+        logger.error("  4. 刷新页面，选择任意请求")
+        logger.error("  5. 在请求头中找到 Cookie 字段并复制")
+        logger.error("")
         return None
     
     # 验证cookie
     try:
-        logger.info("正在验证Cookie...")
+        logger.info("🔄 正在验证Cookie...")
         client = P115Client(cookie_env)
         
         # 测试连接 - 尝试获取用户信息（更快更可靠）
         try:
-            logger.info("正在测试API连接...")
+            logger.info("🌐 正在测试API连接...")
             # 使用更简单的API测试连接
             user_info = client.user_info()
             if user_info and user_info.get('state'):
                 user_name = user_info.get('data', {}).get('user_name', '未知用户')
-                logger.info(f"✓ Cookie验证成功！当前用户: {user_name}")
+                logger.info("=" * 80)
+                logger.info(f"✅ Cookie验证成功！")
+                logger.info(f"👤 当前用户: {user_name}")
+                logger.info("=" * 80)
             else:
-                logger.error("✗ Cookie验证失败: 无法获取用户信息")
+                logger.error("=" * 80)
+                logger.error("❌ Cookie验证失败: 无法获取用户信息")
+                logger.error("=" * 80)
+                logger.error("")
+                logger.error("可能原因:")
+                logger.error("  1. Cookie 格式错误")
+                logger.error("  2. Cookie 已过期（需要重新获取）")
+                logger.error("  3. 115账号异常")
+                logger.error("")
                 return None
         except Exception as e:
-            logger.error(f"✗ 连接115 API失败: {e}")
+            logger.error("=" * 80)
+            logger.error(f"❌ 连接115 API失败: {e}")
+            logger.error("=" * 80)
+            logger.error("")
             logger.error("可能原因:")
             logger.error("  1. 网络连接问题，无法访问 115.com")
             logger.error("  2. Cookie 已过期或格式错误")
             logger.error("  3. 被防火墙或代理拦截")
+            logger.error("")
+            logger.error("解决方案:")
+            logger.error("  1. 检查网络连接")
+            logger.error("  2. 如果使用代理，添加: network_mode: host")
+            logger.error("  3. 重新获取 Cookie")
+            logger.error("")
             return None
         
         # 保存cookie到文件（用于下次重启）
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(COOKIE_FILE, 'w', encoding='utf-8') as f:
-            f.write(cookie_env)
-        logger.info(f"✓ Cookie已保存到 {COOKIE_FILE}")
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(COOKIE_FILE, 'w', encoding='utf-8') as f:
+                f.write(cookie_env)
+            logger.info(f"💾 Cookie已保存到 {COOKIE_FILE}")
+        except Exception as e:
+            logger.warning(f"⚠️  保存Cookie文件失败（不影响运行）: {e}")
         
         return client
         
     except Exception as e:
-        logger.error(f"✗ Cookie验证失败: {e}")
+        logger.error("=" * 80)
+        logger.error(f"❌ 初始化客户端失败: {e}")
+        logger.error("=" * 80)
         return None
 
 
@@ -356,80 +416,114 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
         exclude_extensions: 排除的文件后缀集合
     """
     logger.info("=" * 80)
-    logger.info("自动移动文件任务启动")
-    logger.info(f"配置的映射数量: {len(path_mappings)}")
-    for idx, (src, tgt) in enumerate(path_mappings, 1):
-        logger.info(f"  映射 {idx}: {src} -> {tgt}")
-    logger.info(f"检查间隔: {interval_minutes} 分钟")
-    logger.info(f"最小文件大小: {format_file_size(min_size_bytes)}")
+    logger.info("🚀 自动移动文件任务启动")
+    logger.info("=" * 80)
+    logger.info(f"📊 配置信息:")
+    logger.info(f"   ├─ 映射数量: {len(path_mappings)} 组")
+    logger.info(f"   ├─ 检查间隔: {interval_minutes} 分钟")
+    logger.info(f"   ├─ 最小文件: {format_file_size(min_size_bytes)}")
     if exclude_extensions:
-        logger.info(f"排除的文件后缀: {', '.join(sorted(exclude_extensions))}")
+        logger.info(f"   └─ 排除后缀: {', '.join(sorted(exclude_extensions))}")
     else:
-        logger.info("排除的文件后缀: 无")
+        logger.info(f"   └─ 排除后缀: 无")
+    logger.info("")
+    
+    for idx, (src, tgt) in enumerate(path_mappings, 1):
+        logger.info(f"📁 映射 {idx}: {src} ➜ {tgt}")
     logger.info("=" * 80)
     
     # 解析所有路径映射
     mapping_cids = []
-    for source_path, target_path in path_mappings:
-        logger.info(f"\n正在解析映射: {source_path} -> {target_path}")
+    failed_mappings = []
+    
+    for idx, (source_path, target_path) in enumerate(path_mappings, 1):
+        logger.info(f"\n🔄 正在解析映射 {idx}/{len(path_mappings)}: {source_path} ➜ {target_path}")
         
-        logger.info(f"  解析源目录: {source_path}")
+        logger.info(f"📂 解析源目录: {source_path}")
         source_cid = find_directory_by_path(source_path)
         
         if source_cid is None:
-            logger.error(f"  ✗ 无法找到源目录: {source_path}，跳过此映射")
+            logger.error(f"❌ 无法找到源目录，跳过此映射")
+            failed_mappings.append((source_path, target_path, "源目录不存在"))
             continue
         
-        logger.info(f"  ✓ 源目录 ID: {source_cid}")
-        
-        logger.info(f"  解析目标目录: {target_path}")
+        logger.info(f"📂 解析目标目录: {target_path}")
         target_cid = find_directory_by_path(target_path)
         
         if target_cid is None:
-            logger.error(f"  ✗ 无法找到目标目录: {target_path}，跳过此映射")
+            logger.error(f"❌ 无法找到目标目录，跳过此映射")
+            failed_mappings.append((source_path, target_path, "目标目录不存在"))
             continue
         
-        logger.info(f"  ✓ 目标目录 ID: {target_cid}")
-        
         mapping_cids.append({
+            'index': idx,
             'source_path': source_path,
             'target_path': target_path,
             'source_cid': source_cid,
             'target_cid': target_cid
         })
+        logger.info(f"✅ 映射解析成功")
+    
+    logger.info("")
+    logger.info("=" * 80)
+    if mapping_cids:
+        logger.info(f"✅ 成功解析 {len(mapping_cids)}/{len(path_mappings)} 个路径映射")
+    else:
+        logger.error(f"❌ 没有有效的路径映射")
+        
+    if failed_mappings:
+        logger.warning(f"⚠️  失败 {len(failed_mappings)} 个路径映射:")
+        for src, tgt, reason in failed_mappings:
+            logger.warning(f"   ├─ {src} ➜ {tgt}")
+            logger.warning(f"   └─ 原因: {reason}")
     
     if not mapping_cids:
-        logger.error("没有有效的路径映射，任务终止")
+        logger.error("=" * 80)
+        logger.error("❌ 任务终止: 没有可用的路径映射")
+        logger.error("=" * 80)
         return False
     
-    logger.info(f"\n✓ 成功解析 {len(mapping_cids)} 个路径映射")
+    logger.info("=" * 80)
     
     # 开始循环检查
     run_count = 0
     interval_seconds = interval_minutes * 60
+    total_moved = 0
+    total_failed = 0
     
     try:
         while True:
             run_count += 1
-            logger.info("\n" + "=" * 80)
-            logger.info(f"第 {run_count} 次检查开始 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info("")
+            logger.info("=" * 80)
+            logger.info(f"🔄 第 {run_count} 次检查开始")
+            logger.info(f"⏰ 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info("=" * 80)
             
+            round_moved = 0
+            round_failed = 0
+            
             # 处理每个映射
-            for idx, mapping in enumerate(mapping_cids, 1):
+            for mapping in mapping_cids:
+                idx = mapping['index']
                 source_path = mapping['source_path']
                 target_path = mapping['target_path']
                 source_cid = mapping['source_cid']
                 target_cid = mapping['target_cid']
                 
-                logger.info(f"\n--- 处理映射 {idx}/{len(mapping_cids)}: {source_path} -> {target_path} ---")
+                logger.info("")
+                logger.info(f"📦 处理映射 {idx}/{len(mapping_cids)}")
+                logger.info(f"   源: {source_path}")
+                logger.info(f"   ➜  {target_path}")
+                logger.info("-" * 80)
                 
                 try:
                     # 获取源目录中的文件
-                    logger.info(f"正在扫描源目录 (ID: {source_cid})...")
+                    logger.info(f"🔍 扫描源目录 (ID: {source_cid})...")
                     files_to_move = []
                     total_files = 0
                     excluded_files = 0
+                    small_files = 0
                     
                     for file_info in iter_files(
                         client=client,
@@ -449,7 +543,6 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
                         # 检查是否应该排除该文件
                         if should_exclude_file(file_name, exclude_extensions):
                             excluded_files += 1
-                            logger.debug(f"  ○ 排除: {display_path} (后缀被排除)")
                             continue
                         
                         # 检查文件大小
@@ -461,16 +554,24 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
                                 'path': file_path,
                                 'display_path': display_path
                             })
-                            logger.info(f"  → 符合条件: {display_path} ({format_file_size(file_size)})")
+                            logger.info(f"  ✓ {display_path} ({format_file_size(file_size)})")
+                        else:
+                            small_files += 1
                     
-                    logger.info(f"\n扫描完成: 共 {total_files} 个文件")
+                    logger.info("")
+                    logger.info(f"📊 扫描完成:")
+                    logger.info(f"   ├─ 总文件数: {total_files}")
+                    if small_files > 0:
+                        logger.info(f"   ├─ 过小文件: {small_files} (< {format_file_size(min_size_bytes)})")
                     if excluded_files > 0:
-                        logger.info(f"  排除 {excluded_files} 个文件（后缀过滤）")
-                    logger.info(f"  {len(files_to_move)} 个文件符合移动条件")
+                        logger.info(f"   ├─ 排除文件: {excluded_files} (后缀过滤)")
+                    logger.info(f"   └─ 待移动: {len(files_to_move)}")
                     
                     # 移动文件
                     if files_to_move:
-                        logger.info(f"\n开始移动 {len(files_to_move)} 个文件到目标目录 (ID: {target_cid})...")
+                        logger.info("")
+                        logger.info(f"📤 开始移动 {len(files_to_move)} 个文件...")
+                        logger.info("-" * 80)
                         
                         success_count = 0
                         fail_count = 0
@@ -478,46 +579,77 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
                         for file_info in files_to_move:
                             try:
                                 display_info = file_info.get('display_path') or file_info.get('name', '未知文件')
-                                logger.info(f"  移动: {display_info} (ID: {file_info['id']})")
+                                size_info = format_file_size(file_info['size'])
+                                logger.info(f"  ➜ {display_info}")
+                                logger.info(f"     大小: {size_info}, ID: {file_info['id']}")
+                                
                                 result = move_files(file_info['id'], target_cid)
                                 
                                 if result.get('state'):
                                     success_count += 1
-                                    logger.info(f"    ✓ 成功")
+                                    logger.info(f"     ✅ 成功")
                                 else:
                                     fail_count += 1
                                     error_msg = result.get('error', result.get('error_msg', '未知错误'))
-                                    logger.warning(f"    ✗ 失败: {error_msg}")
+                                    logger.error(f"     ❌ 失败: {error_msg}")
                                 
                                 # 添加小延迟，避免请求过快
                                 time.sleep(0.5)
                                 
                             except Exception as e:
                                 fail_count += 1
-                                logger.error(f"    ✗ 异常: {e}")
+                                logger.error(f"     ❌ 异常: {e}")
                         
-                        logger.info(f"\n移动结果: 成功 {success_count} 个，失败 {fail_count} 个")
+                        logger.info("")
+                        logger.info(f"📈 移动结果: ✅ 成功 {success_count} | ❌ 失败 {fail_count}")
+                        round_moved += success_count
+                        round_failed += fail_count
                     else:
-                        logger.info("没有符合条件的文件需要移动")
+                        logger.info("")
+                        logger.info("💤 没有符合条件的文件需要移动")
                     
                 except Exception as e:
-                    logger.error(f"处理映射时发生错误: {e}")
+                    logger.error(f"❌ 处理映射时发生错误: {e}")
+                    import traceback
+                    logger.error(f"详细错误:\n{traceback.format_exc()}")
+            
+            # 本轮统计
+            total_moved += round_moved
+            total_failed += round_failed
+            
+            logger.info("")
+            logger.info("=" * 80)
+            logger.info(f"📊 本轮统计: ✅ 移动 {round_moved} 个 | ❌ 失败 {round_failed} 个")
+            logger.info(f"📊 总计统计: ✅ 已移动 {total_moved} 个 | ❌ 失败 {total_failed} 个")
             
             # 等待下一次检查
             next_check_time = datetime.now().timestamp() + interval_seconds
             next_check_str = datetime.fromtimestamp(next_check_time).strftime('%Y-%m-%d %H:%M:%S')
             
-            logger.info(f"\n下次检查时间: {next_check_str}")
-            logger.info(f"等待 {interval_minutes} 分钟...")
+            logger.info(f"⏰ 下次检查: {next_check_str}")
+            logger.info(f"😴 等待 {interval_minutes} 分钟...")
+            logger.info("=" * 80)
             
             time.sleep(interval_seconds)
             
     except KeyboardInterrupt:
-        logger.info("\n\n收到中断信号，任务停止")
-        logger.info(f"总共执行了 {run_count} 次检查")
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("🛑 收到中断信号，任务停止")
+        logger.info("=" * 80)
+        logger.info(f"📊 运行统计:")
+        logger.info(f"   ├─ 执行次数: {run_count}")
+        logger.info(f"   ├─ 成功移动: {total_moved} 个文件")
+        logger.info(f"   └─ 移动失败: {total_failed} 个文件")
+        logger.info("=" * 80)
         return True
     except Exception as e:
-        logger.error(f"任务异常终止: {e}")
+        logger.error("")
+        logger.error("=" * 80)
+        logger.error(f"❌ 任务异常终止: {e}")
+        logger.error("=" * 80)
+        import traceback
+        logger.error(f"详细错误:\n{traceback.format_exc()}")
         return False
 
 
@@ -544,45 +676,72 @@ def main():
     
     setup_logger(log_days)
     
+    logger.info("")
     logger.info("=" * 80)
-    logger.info("115网盘文件移动工具 - Docker版本")
+    logger.info("🚀 115网盘文件移动工具 - Docker版本")
     logger.info("=" * 80)
-    logger.info(f"日志保留天数: {log_days} 天")
-    logger.info(f"运行模式: {mode}")
+    logger.info(f"📅 启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"📝 日志保留: {log_days} 天")
+    logger.info(f"🔧 运行模式: {mode}")
+    logger.info("=" * 80)
     
     # 解析路径映射
     path_mappings = []
     
+    logger.info("")
+    logger.info("🔍 解析配置...")
+    
     if path_mappings_str:
         # 使用新的 PATH_MAPPINGS 配置
-        logger.info("使用 PATH_MAPPINGS 配置（多组映射）")
+        logger.info("📋 检测到 PATH_MAPPINGS 配置（多组映射模式）")
         path_mappings = parse_path_mappings(path_mappings_str)
         if not path_mappings:
-            logger.error("错误: PATH_MAPPINGS 格式无效")
-            logger.error("格式: 源路径1->目标路径1,源路径2->目标路径2")
-            logger.error("示例: /待处理/下载->/已完成/视频,/临时/缓存->/归档/2024")
+            logger.error("")
+            logger.error("=" * 80)
+            logger.error("❌ 错误: PATH_MAPPINGS 格式无效")
+            logger.error("=" * 80)
+            logger.error("")
+            logger.error("格式说明:")
+            logger.error("  源路径1->目标路径1,源路径2->目标路径2")
+            logger.error("")
+            logger.error("示例:")
+            logger.error("  PATH_MAPPINGS='/待处理/下载->/已完成/视频,/临时/缓存->/归档/2024'")
+            logger.error("")
+            logger.error("注意事项:")
+            logger.error("  - 路径必须以 '/' 开头")
+            logger.error("  - 使用 '->' 分隔源和目标")
+            logger.error("  - 使用 ',' 分隔多组映射")
+            logger.error("=" * 80)
             return 1
     elif source_path and target_path:
         # 使用旧的 SOURCE_PATH 和 TARGET_PATH 配置（兼容）
-        logger.info("使用 SOURCE_PATH 和 TARGET_PATH 配置（单组映射）")
+        logger.info("📋 检测到 SOURCE_PATH/TARGET_PATH 配置（单组映射模式）")
         path_mappings = [(source_path, target_path)]
+        logger.info(f"✓ 映射 1: {source_path} -> {target_path}")
     else:
-        logger.error("错误: 未设置路径映射配置")
+        logger.error("")
+        logger.error("=" * 80)
+        logger.error("❌ 错误: 未设置路径映射配置")
+        logger.error("=" * 80)
+        logger.error("")
+        logger.error("请选择以下方式之一进行配置:")
         logger.error("")
         logger.error("方式1 - 多组映射（推荐）:")
-        logger.error("  -e PATH_MAPPINGS='/源路径1->/目标路径1,/源路径2->/目标路径2'")
+        logger.error("  docker run -e PATH_MAPPINGS='/源1->/目标1,/源2->/目标2' ...")
         logger.error("")
         logger.error("方式2 - 单组映射（兼容旧版）:")
-        logger.error("  -e SOURCE_PATH='/待处理/下载'")
-        logger.error("  -e TARGET_PATH='/已完成/视频'")
+        logger.error("  docker run -e SOURCE_PATH='/待处理/下载' \\")
+        logger.error("             -e TARGET_PATH='/已完成/视频' ...")
+        logger.error("")
+        logger.error("示例:")
+        logger.error("  PATH_MAPPINGS='/待处理/下载->/已完成/视频,/临时->/归档'")
+        logger.error("=" * 80)
         return 1
     
-    logger.info(f"配置的路径映射: {len(path_mappings)} 组")
+    logger.info(f"✅ 成功解析 {len(path_mappings)} 组路径映射")
     
     # 解析排除的文件后缀
     exclude_extensions = parse_exclude_extensions(exclude_extensions_str)
-    if exclude_extensions:
-        logger.info(f"排除的文件后缀: {', '.join(sorted(exclude_extensions))}")
     
     # 验证环境变量
     if mode == 'auto':
@@ -590,32 +749,40 @@ def main():
         try:
             interval_minutes = int(check_interval)
             if interval_minutes < 2:
-                logger.warning(f"检查间隔 {interval_minutes} 分钟过短，使用最小值 2 分钟")
+                logger.warning(f"⚠️  检查间隔 {interval_minutes} 分钟过短，已调整为最小值 2 分钟")
                 interval_minutes = 2
+            logger.info(f"⏰ 检查间隔: {interval_minutes} 分钟")
         except:
-            logger.error(f"错误: CHECK_INTERVAL 值无效: {check_interval}")
+            logger.error(f"❌ 错误: CHECK_INTERVAL 值无效: {check_interval}")
+            logger.error("   必须是数字，单位为分钟")
             return 1
         
         # 解析文件大小
         min_size_bytes = parse_file_size(min_file_size)
         if min_size_bytes is None:
-            logger.error(f"错误: MIN_FILE_SIZE 格式无效: {min_file_size}")
-            logger.error("支持格式: 200MB, 1.5GB, 500KB 等")
+            logger.error(f"❌ 错误: MIN_FILE_SIZE 格式无效: {min_file_size}")
+            logger.error("   支持格式: 200MB, 1.5GB, 500KB, 1TB 等")
             return 1
         
-        logger.info(f"检查间隔: {interval_minutes} 分钟")
-        logger.info(f"最小文件大小: {format_file_size(min_size_bytes)}")
+        logger.info(f"📏 最小文件: {format_file_size(min_size_bytes)}")
     
     # 初始化客户端
+    logger.info("")
     if not init_client_from_env():
-        logger.error("客户端初始化失败，程序退出")
+        logger.error("")
+        logger.error("=" * 80)
+        logger.error("❌ 程序退出: 客户端初始化失败")
+        logger.error("=" * 80)
         return 1
     
     # 运行自动模式
+    logger.info("")
     if mode == 'auto':
         auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclude_extensions)
     else:
-        logger.error(f"错误: 不支持的模式: {mode}")
+        logger.error("=" * 80)
+        logger.error(f"❌ 错误: 不支持的模式: {mode}")
+        logger.error("=" * 80)
         logger.error("当前Docker版本仅支持 auto 模式")
         return 1
     
