@@ -1,0 +1,51 @@
+# 用户版本 - Docker Compose配置文件
+# 直接使用Docker Hub上的镜像
+
+version: '3.8'
+
+services:
+  move_items:
+    # 使用Docker Hub上的镜像（替换yourusername为实际用户名）
+    image: yourusername/115-move-items:latest
+    
+    container_name: 115_move_items
+    restart: unless-stopped
+    
+    environment:
+      # ========== 必填配置 ==========
+      # 115网盘的Cookie（必填）
+      - COOKIE=你的115网盘Cookie
+      
+      # 源目录路径 - 待检查的目录（必填）
+      - SOURCE_PATH=/待处理/下载
+      
+      # 目标目录路径 - 文件移动到此目录（必填）
+      - TARGET_PATH=/已完成/视频
+      
+      # ========== 可选配置 ==========
+      # 检查间隔（分钟），默认5分钟
+      - CHECK_INTERVAL=5
+      
+      # 最小文件大小，支持 KB/MB/GB/TB，默认200MB
+      - MIN_FILE_SIZE=200MB
+      
+      # 日志保留天数，默认7天
+      - LOG_RETENTION_DAYS=7
+      
+      # 时区设置
+      - TZ=Asia/Shanghai
+    
+    volumes:
+      # 日志目录映射（可选）
+      - ./logs:/app/logs
+      
+      # 数据目录映射（持久化Cookie）
+      - ./data:/app/data
+
+# ========== 使用说明 ==========
+# 1. 替换 yourusername 为实际的Docker Hub用户名
+# 2. 修改 COOKIE 为你的115网盘Cookie
+# 3. 修改 SOURCE_PATH 和 TARGET_PATH 为实际路径
+# 4. 运行: docker-compose up -d
+# 5. 查看日志: docker-compose logs -f
+# 6. 停止: docker-compose down

@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  move_items:
+    # 开发环境：本地构建镜像
+    build: .
+    # 生产环境：使用Docker Hub镜像（取消下面一行的注释）
+    # image: yourusername/115-move-items:latest
+    
+    container_name: 115_move_items
+    restart: unless-stopped
+    environment:
+      # 必填：115网盘的Cookie
+      - COOKIE=your_cookie_here
+      
+      # 必填：源目录路径（待检查的目录）
+      - SOURCE_PATH=/待处理/下载
+      
+      # 必填：目标目录路径（文件移动到此目录）
+      - TARGET_PATH=/已完成/视频
+      
+      # 可选：检查间隔（分钟），默认5分钟，最少2分钟
+      - CHECK_INTERVAL=5
+      
+      # 可选：最小文件大小，支持 KB/MB/GB/TB，默认200MB
+      - MIN_FILE_SIZE=200MB
+      
+      # 可选：日志保留天数，默认7天
+      - LOG_RETENTION_DAYS=7
+      
+      # 可选：运行模式，默认auto（自动模式）
+      - MODE=auto
+    
+    volumes:
+      # 日志目录映射（可选，用于查看日志）
+      - ./logs:/app/logs
+      
+      # 数据目录映射（持久化cookie）
+      - ./data:/app/data
+    
+    # 时区设置
+    environment:
+      - TZ=Asia/Shanghai
