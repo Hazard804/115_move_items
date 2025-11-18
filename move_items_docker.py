@@ -64,6 +64,95 @@ def setup_logger(log_retention_days=7):
     return logger
 
 
+def parse_path_mappings(mappings_str):
+    """
+    解析路径映射配置
+    
+    参数:
+        mappings_str: 映射字符串，格式: "源路径1->目标路径1,源路径2->目标路径2"
+    
+    返回:
+        list: [(源路径, 目标路径), ...] 或空列表
+    """
+    if not mappings_str or not mappings_str.strip():
+        return []
+    
+    mappings = []
+    pairs = mappings_str.split(',')
+    
+    for pair in pairs:
+        pair = pair.strip()
+        if '->' not in pair:
+            logger.warning(f"忽略无效的映射配置: {pair}")
+            continue
+        
+        parts = pair.split('->', 1)
+        if len(parts) != 2:
+            logger.warning(f"忽略无效的映射配置: {pair}")
+            continue
+        
+        source = parts[0].strip()
+        target = parts[1].strip()
+        
+        if not source or not target:
+            logger.warning(f"忽略空路径的映射: {pair}")
+            continue
+        
+        mappings.append((source, target))
+    
+    return mappings
+
+
+def parse_exclude_extensions(extensions_str):
+    """
+    解析排除的文件后缀
+    
+    参数:
+        extensions_str: 后缀字符串，格式: ".txt,.tmp,.log" 或 "txt,tmp,log"
+    
+    返回:
+        set: 后缀集合（统一小写，包含点号）
+    """
+    if not extensions_str or not extensions_str.strip():
+        return set()
+    
+    extensions = set()
+    parts = extensions_str.split(',')
+    
+    for part in parts:
+        ext = part.strip().lower()
+        if not ext:
+            continue
+        
+        # 确保后缀以点开头
+        if not ext.startswith('.'):
+            ext = '.' + ext
+        
+        extensions.add(ext)
+    
+    return extensions
+
+
+def should_exclude_file(filename, exclude_extensions):
+    """
+    判断文件是否应该被排除
+    
+    参数:
+        filename: 文件名
+        exclude_extensions: 排除的后缀集合
+    
+    返回:
+        bool: True表示应该排除，False表示不排除
+    """
+    if not exclude_extensions:
+        return False
+    
+    # 获取文件后缀（小写）
+    file_ext = os.path.splitext(filename)[1].lower()
+    
+    return file_ext in exclude_extensions
+
+
 def format_file_size(size):
     """格式化文件大小显示"""
     if size < 1024:
@@ -256,42 +345,64 @@ def init_client_from_env():
         return None
 
 
-def auto_move_files_task(source_path, target_path, interval_minutes, min_size_bytes):
+def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclude_extensions):
     """
-    自动移动文件任务
+    自动移动文件任务（支持多组路径映射）
     
     参数:
-        source_path: 源目录路径
-        target_path: 目标目录路径
+        path_mappings: 路径映射列表 [(源路径, 目标路径), ...]
         interval_minutes: 检查间隔（分钟）
         min_size_bytes: 最小文件大小（字节）
+        exclude_extensions: 排除的文件后缀集合
     """
     logger.info("=" * 80)
     logger.info("自动移动文件任务启动")
-    logger.info(f"源目录路径: {source_path}")
-    logger.info(f"目标目录路径: {target_path}")
+    logger.info(f"配置的映射数量: {len(path_mappings)}")
+    for idx, (src, tgt) in enumerate(path_mappings, 1):
+        logger.info(f"  映射 {idx}: {src} -> {tgt}")
     logger.info(f"检查间隔: {interval_minutes} 分钟")
     logger.info(f"最小文件大小: {format_file_size(min_size_bytes)}")
+    if exclude_extensions:
+        logger.info(f"排除的文件后缀: {', '.join(sorted(exclude_extensions))}")
+    else:
+        logger.info("排除的文件后缀: 无")
     logger.info("=" * 80)
     
-    # 解析目录路径
-    logger.info("正在解析源目录路径...")
-    source_cid = find_directory_by_path(source_path)
+    # 解析所有路径映射
+    mapping_cids = []
+    for source_path, target_path in path_mappings:
+        logger.info(f"\n正在解析映射: {source_path} -> {target_path}")
+        
+        logger.info(f"  解析源目录: {source_path}")
+        source_cid = find_directory_by_path(source_path)
+        
+        if source_cid is None:
+            logger.error(f"  ✗ 无法找到源目录: {source_path}，跳过此映射")
+            continue
+        
+        logger.info(f"  ✓ 源目录 ID: {source_cid}")
+        
+        logger.info(f"  解析目标目录: {target_path}")
+        target_cid = find_directory_by_path(target_path)
+        
+        if target_cid is None:
+            logger.error(f"  ✗ 无法找到目标目录: {target_path}，跳过此映射")
+            continue
+        
+        logger.info(f"  ✓ 目标目录 ID: {target_cid}")
+        
+        mapping_cids.append({
+            'source_path': source_path,
+            'target_path': target_path,
+            'source_cid': source_cid,
+            'target_cid': target_cid
+        })
     
-    if source_cid is None:
-        logger.error(f"无法找到源目录: {source_path}")
+    if not mapping_cids:
+        logger.error("没有有效的路径映射，任务终止")
         return False
     
-    logger.info(f"源目录 ID: {source_cid}")
-    
-    logger.info("正在解析目标目录路径...")
-    target_cid = find_directory_by_path(target_path)
-    
-    if target_cid is None:
-        logger.error(f"无法找到目标目录: {target_path}")
-        return False
-    
-    logger.info(f"目标目录 ID: {target_cid}")
+    logger.info(f"\n✓ 成功解析 {len(mapping_cids)} 个路径映射")
     
     # 开始循环检查
     run_count = 0
@@ -304,74 +415,93 @@ def auto_move_files_task(source_path, target_path, interval_minutes, min_size_by
             logger.info(f"第 {run_count} 次检查开始 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             logger.info("=" * 80)
             
-            try:
-                # 获取源目录中的文件
-                logger.info(f"正在扫描源目录 (ID: {source_cid})...")
-                files_to_move = []
-                total_files = 0
+            # 处理每个映射
+            for idx, mapping in enumerate(mapping_cids, 1):
+                source_path = mapping['source_path']
+                target_path = mapping['target_path']
+                source_cid = mapping['source_cid']
+                target_cid = mapping['target_cid']
                 
-                for file_info in iter_files(
-                    client=client,
-                    cid=source_cid,
-                    cur=0,  # 遍历子目录树
-                    page_size=1000
-                ):
-                    total_files += 1
-                    file_size = file_info.get('size', 0)
-                    file_name = file_info.get('name', '')
-                    file_id = file_info.get('id', '')
-                    file_path = file_info.get('path', '')
-                    
-                    # 如果path为空，使用name作为显示
-                    display_path = file_path if file_path else file_name
-                    
-                    # 检查文件大小
-                    if file_size >= min_size_bytes:
-                        files_to_move.append({
-                            'id': file_id,
-                            'name': file_name,
-                            'size': file_size,
-                            'path': file_path,
-                            'display_path': display_path
-                        })
-                        logger.info(f"  → 符合条件: {display_path} ({format_file_size(file_size)})")
+                logger.info(f"\n--- 处理映射 {idx}/{len(mapping_cids)}: {source_path} -> {target_path} ---")
                 
-                logger.info(f"\n扫描完成: 共 {total_files} 个文件，{len(files_to_move)} 个符合移动条件")
-                
-                # 移动文件
-                if files_to_move:
-                    logger.info(f"\n开始移动 {len(files_to_move)} 个文件到目标目录 (ID: {target_cid})...")
+                try:
+                    # 获取源目录中的文件
+                    logger.info(f"正在扫描源目录 (ID: {source_cid})...")
+                    files_to_move = []
+                    total_files = 0
+                    excluded_files = 0
                     
-                    success_count = 0
-                    fail_count = 0
+                    for file_info in iter_files(
+                        client=client,
+                        cid=source_cid,
+                        cur=0,  # 遍历子目录树
+                        page_size=1000
+                    ):
+                        total_files += 1
+                        file_size = file_info.get('size', 0)
+                        file_name = file_info.get('name', '')
+                        file_id = file_info.get('id', '')
+                        file_path = file_info.get('path', '')
+                        
+                        # 如果path为空，使用name作为显示
+                        display_path = file_path if file_path else file_name
+                        
+                        # 检查是否应该排除该文件
+                        if should_exclude_file(file_name, exclude_extensions):
+                            excluded_files += 1
+                            logger.debug(f"  ○ 排除: {display_path} (后缀被排除)")
+                            continue
+                        
+                        # 检查文件大小
+                        if file_size >= min_size_bytes:
+                            files_to_move.append({
+                                'id': file_id,
+                                'name': file_name,
+                                'size': file_size,
+                                'path': file_path,
+                                'display_path': display_path
+                            })
+                            logger.info(f"  → 符合条件: {display_path} ({format_file_size(file_size)})")
                     
-                    for file_info in files_to_move:
-                        try:
-                            display_info = file_info.get('display_path') or file_info.get('name', '未知文件')
-                            logger.info(f"  移动: {display_info} (ID: {file_info['id']})")
-                            result = move_files(file_info['id'], target_cid)
-                            
-                            if result.get('state'):
-                                success_count += 1
-                                logger.info(f"    ✓ 成功")
-                            else:
+                    logger.info(f"\n扫描完成: 共 {total_files} 个文件")
+                    if excluded_files > 0:
+                        logger.info(f"  排除 {excluded_files} 个文件（后缀过滤）")
+                    logger.info(f"  {len(files_to_move)} 个文件符合移动条件")
+                    
+                    # 移动文件
+                    if files_to_move:
+                        logger.info(f"\n开始移动 {len(files_to_move)} 个文件到目标目录 (ID: {target_cid})...")
+                        
+                        success_count = 0
+                        fail_count = 0
+                        
+                        for file_info in files_to_move:
+                            try:
+                                display_info = file_info.get('display_path') or file_info.get('name', '未知文件')
+                                logger.info(f"  移动: {display_info} (ID: {file_info['id']})")
+                                result = move_files(file_info['id'], target_cid)
+                                
+                                if result.get('state'):
+                                    success_count += 1
+                                    logger.info(f"    ✓ 成功")
+                                else:
+                                    fail_count += 1
+                                    error_msg = result.get('error', result.get('error_msg', '未知错误'))
+                                    logger.warning(f"    ✗ 失败: {error_msg}")
+                                
+                                # 添加小延迟，避免请求过快
+                                time.sleep(0.5)
+                                
+                            except Exception as e:
                                 fail_count += 1
-                                error_msg = result.get('error', result.get('error_msg', '未知错误'))
-                                logger.warning(f"    ✗ 失败: {error_msg}")
-                            
-                            # 添加小延迟，避免请求过快
-                            time.sleep(0.5)
-                            
-                        except Exception as e:
-                            fail_count += 1
-                            logger.error(f"    ✗ 异常: {e}")
+                                logger.error(f"    ✗ 异常: {e}")
+                        
+                        logger.info(f"\n移动结果: 成功 {success_count} 个，失败 {fail_count} 个")
+                    else:
+                        logger.info("没有符合条件的文件需要移动")
                     
-                    logger.info(f"\n移动结果: 成功 {success_count} 个，失败 {fail_count} 个")
-                else:
-                    logger.info("没有符合条件的文件需要移动")
-                
-            except Exception as e:
-                logger.error(f"检查过程中发生错误: {e}")
+                except Exception as e:
+                    logger.error(f"处理映射时发生错误: {e}")
             
             # 等待下一次检查
             next_check_time = datetime.now().timestamp() + interval_seconds
@@ -397,6 +527,8 @@ def main():
     # 读取环境变量
     source_path = os.environ.get('SOURCE_PATH', '').strip()
     target_path = os.environ.get('TARGET_PATH', '').strip()
+    path_mappings_str = os.environ.get('PATH_MAPPINGS', '').strip()
+    exclude_extensions_str = os.environ.get('EXCLUDE_EXTENSIONS', '').strip()
     check_interval = os.environ.get('CHECK_INTERVAL', '5').strip()
     min_file_size = os.environ.get('MIN_FILE_SIZE', '200MB').strip()
     log_retention_days = os.environ.get('LOG_RETENTION_DAYS', '7').strip()
@@ -418,18 +550,42 @@ def main():
     logger.info(f"日志保留天数: {log_days} 天")
     logger.info(f"运行模式: {mode}")
     
+    # 解析路径映射
+    path_mappings = []
+    
+    if path_mappings_str:
+        # 使用新的 PATH_MAPPINGS 配置
+        logger.info("使用 PATH_MAPPINGS 配置（多组映射）")
+        path_mappings = parse_path_mappings(path_mappings_str)
+        if not path_mappings:
+            logger.error("错误: PATH_MAPPINGS 格式无效")
+            logger.error("格式: 源路径1->目标路径1,源路径2->目标路径2")
+            logger.error("示例: /待处理/下载->/已完成/视频,/临时/缓存->/归档/2024")
+            return 1
+    elif source_path and target_path:
+        # 使用旧的 SOURCE_PATH 和 TARGET_PATH 配置（兼容）
+        logger.info("使用 SOURCE_PATH 和 TARGET_PATH 配置（单组映射）")
+        path_mappings = [(source_path, target_path)]
+    else:
+        logger.error("错误: 未设置路径映射配置")
+        logger.error("")
+        logger.error("方式1 - 多组映射（推荐）:")
+        logger.error("  -e PATH_MAPPINGS='/源路径1->/目标路径1,/源路径2->/目标路径2'")
+        logger.error("")
+        logger.error("方式2 - 单组映射（兼容旧版）:")
+        logger.error("  -e SOURCE_PATH='/待处理/下载'")
+        logger.error("  -e TARGET_PATH='/已完成/视频'")
+        return 1
+    
+    logger.info(f"配置的路径映射: {len(path_mappings)} 组")
+    
+    # 解析排除的文件后缀
+    exclude_extensions = parse_exclude_extensions(exclude_extensions_str)
+    if exclude_extensions:
+        logger.info(f"排除的文件后缀: {', '.join(sorted(exclude_extensions))}")
+    
     # 验证环境变量
     if mode == 'auto':
-        if not source_path:
-            logger.error("错误: 未设置 SOURCE_PATH 环境变量")
-            logger.error("示例: -e SOURCE_PATH='/待处理/下载'")
-            return 1
-        
-        if not target_path:
-            logger.error("错误: 未设置 TARGET_PATH 环境变量")
-            logger.error("示例: -e TARGET_PATH='/已完成/视频'")
-            return 1
-        
         # 解析检查间隔
         try:
             interval_minutes = int(check_interval)
@@ -447,8 +603,6 @@ def main():
             logger.error("支持格式: 200MB, 1.5GB, 500KB 等")
             return 1
         
-        logger.info(f"源目录: {source_path}")
-        logger.info(f"目标目录: {target_path}")
         logger.info(f"检查间隔: {interval_minutes} 分钟")
         logger.info(f"最小文件大小: {format_file_size(min_size_bytes)}")
     
@@ -459,7 +613,7 @@ def main():
     
     # 运行自动模式
     if mode == 'auto':
-        auto_move_files_task(source_path, target_path, interval_minutes, min_size_bytes)
+        auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclude_extensions)
     else:
         logger.error(f"错误: 不支持的模式: {mode}")
         logger.error("当前Docker版本仅支持 auto 模式")

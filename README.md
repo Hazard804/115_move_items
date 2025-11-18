@@ -98,13 +98,87 @@ docker run -d \
 | 变量名 | 必填 | 默认值 | 说明 |
 |-------|------|--------|------|
 | `COOKIE` | ✅ | - | 115网盘的Cookie |
-| `SOURCE_PATH` | ✅ | - | 源目录路径（待检查的目录） |
-| `TARGET_PATH` | ✅ | - | 目标目录路径（移动目标） |
+| `PATH_MAPPINGS` | ⭐ | - | 多组路径映射（推荐）格式: `源1->目标1,源2->目标2` |
+| `SOURCE_PATH` | ⭐ | - | 源目录路径（单组映射，兼容旧版） |
+| `TARGET_PATH` | ⭐ | - | 目标目录路径（单组映射，兼容旧版） |
+| `EXCLUDE_EXTENSIONS` | ❌ | - | 排除的文件后缀，如: `.txt,.tmp,.log` |
 | `CHECK_INTERVAL` | ❌ | 5 | 检查间隔（分钟），最少2分钟 |
 | `MIN_FILE_SIZE` | ❌ | 200MB | 最小文件大小（KB/MB/GB/TB） |
 | `LOG_RETENTION_DAYS` | ❌ | 7 | 日志保留天数 |
 | `MODE` | ❌ | auto | 运行模式（目前只支持 auto） |
 | `TZ` | ❌ | Asia/Shanghai | 时区设置 |
+
+> **注意**：`PATH_MAPPINGS` 和 `SOURCE_PATH`/`TARGET_PATH` 二选一即可。推荐使用 `PATH_MAPPINGS` 支持多组映射。
+
+### 🆕 多组路径映射
+
+使用 `PATH_MAPPINGS` 可以配置多组源目录到目标目录的映射：
+
+```yaml
+environment:
+  - PATH_MAPPINGS=/待处理/下载->/已完成/视频,/临时/缓存->/归档/2024,/新增/测试->/备份/测试
+```
+
+**格式说明**：
+- 使用 `->` 分隔源路径和目标路径
+- 使用 `,` 分隔多组映射
+- 示例：`源路径1->目标路径1,源路径2->目标路径2`
+
+**Docker Compose 完整示例**：
+
+```yaml
+version: '3.8'
+
+services:
+  move_items:
+    image: hazard084/115-move-items:latest
+    container_name: 115_move_items
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - COOKIE=你的115网盘Cookie
+      
+      # 多组路径映射（推荐）
+      - PATH_MAPPINGS=/待处理/下载->/已完成/视频,/临时/缓存->/归档/2024
+      
+      # 排除特定后缀的文件
+      - EXCLUDE_EXTENSIONS=.txt,.nfo,.jpg,.png
+      
+      - CHECK_INTERVAL=5
+      - MIN_FILE_SIZE=200MB
+      - LOG_RETENTION_DAYS=7
+      - TZ=Asia/Shanghai
+    
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+```
+
+### 🆕 排除文件后缀
+
+使用 `EXCLUDE_EXTENSIONS` 可以排除特定后缀的文件不进行移动：
+
+```yaml
+environment:
+  # 排除文本文件和临时文件
+  - EXCLUDE_EXTENSIONS=.txt,.tmp,.log
+  
+  # 排除图片和字幕文件
+  - EXCLUDE_EXTENSIONS=.jpg,.png,.nfo,.srt
+  
+  # 也可以不带点号
+  - EXCLUDE_EXTENSIONS=txt,tmp,log
+```
+
+### 单组映射（兼容旧版）
+
+如果只需要一组映射，可以继续使用旧的配置方式：
+
+```yaml
+environment:
+  - SOURCE_PATH=/待处理/下载
+  - TARGET_PATH=/已完成/视频
+```
 
 ### 获取 115网盘 Cookie
 

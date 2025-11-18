@@ -91,12 +91,33 @@ docker run -d \
 | 变量名 | 必填 | 默认值 | 说明 |
 |-------|------|--------|------|
 | `COOKIE` | ✅ | - | 115网盘的Cookie |
-| `SOURCE_PATH` | ✅ | - | 源目录路径 |
-| `TARGET_PATH` | ✅ | - | 目标目录路径 |
+| `PATH_MAPPINGS` | ⭐ | - | 多组路径映射（推荐） |
+| `SOURCE_PATH` | ⭐ | - | 源目录路径（单组） |
+| `TARGET_PATH` | ⭐ | - | 目标目录路径（单组） |
+| `EXCLUDE_EXTENSIONS` | ❌ | - | 排除的文件后缀 |
 | `CHECK_INTERVAL` | ❌ | 5 | 检查间隔（分钟） |
 | `MIN_FILE_SIZE` | ❌ | 200MB | 最小文件大小 |
 | `LOG_RETENTION_DAYS` | ❌ | 7 | 日志保留天数 |
 | `TZ` | ❌ | Asia/Shanghai | 时区 |
+
+### 🆕 多组路径映射
+
+配置多组源目录到目标目录的映射：
+
+```yaml
+environment:
+  # 格式: 源路径1->目标路径1,源路径2->目标路径2
+  - PATH_MAPPINGS=/待处理/下载->/已完成/视频,/临时/缓存->/归档/2024
+```
+
+### 🆕 排除文件后缀
+
+排除特定后缀的文件不进行移动：
+
+```yaml
+environment:
+  - EXCLUDE_EXTENSIONS=.txt,.nfo,.jpg,.png
+```
 
 ### 获取 115网盘 Cookie
 
