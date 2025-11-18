@@ -30,11 +30,15 @@ services:
       # 必填：115网盘的Cookie
       - COOKIE=你的115网盘Cookie
       
-      # 必填：源目录路径（待检查的目录）
-      - SOURCE_PATH=/待处理/下载
+      # 方式1：多组路径映射（推荐）
+      - PATH_MAPPINGS=/待处理/下载->/已完成/视频,/临时/缓存->/归档/2024
       
-      # 必填：目标目录路径（文件移动到此目录）
-      - TARGET_PATH=/已完成/视频
+      # 方式2：单组映射（二选一，兼容旧版）
+      # - SOURCE_PATH=/待处理/下载
+      # - TARGET_PATH=/已完成/视频
+      
+      # 可选：排除特定后缀的文件
+      - EXCLUDE_EXTENSIONS=.txt,.nfo,.jpg,.png,.srt
       
       # 可选：检查间隔（分钟），默认5分钟
       - CHECK_INTERVAL=5
@@ -80,8 +84,8 @@ docker run -d \
   --restart unless-stopped \
   --network host \
   -e COOKIE='你的115网盘Cookie' \
-  -e SOURCE_PATH='/待处理/下载' \
-  -e TARGET_PATH='/已完成/视频' \
+  -e PATH_MAPPINGS='/待处理/下载->/已完成/视频,/临时/缓存->/归档/2024' \
+  -e EXCLUDE_EXTENSIONS='.txt,.nfo,.jpg,.png' \
   -e CHECK_INTERVAL=5 \
   -e MIN_FILE_SIZE=200MB \
   -e LOG_RETENTION_DAYS=7 \
@@ -324,18 +328,25 @@ network_mode: host
 **更新 Cookie 的步骤**：
 
 1. 重新获取 Cookie（见上面的获取方法）
-2. 更新配置：
+2. 更新配置（选择其中一种方式）：
 
 ```bash
-# 方式1：修改 docker-compose.yml
-vim docker-compose.yml  # 更新 COOKIE 环境变量
+# 方式1：修改环境变量（推荐）
+# 编辑 docker-compose.yml，更新 COOKIE 环境变量
+vim docker-compose.yml
 docker-compose restart
+# 新 Cookie 会自动覆盖持久化文件中的旧 Cookie
 
-# 方式2：删除旧 Cookie 文件
+# 方式2：删除持久化文件
 rm data/115-cookies.txt
 # 然后修改 docker-compose.yml 并重启
 docker-compose restart
 ```
+
+**Cookie 优先级**：
+- ✅ 优先使用环境变量中的 Cookie
+- ✅ 环境变量为空时，从 `data/115-cookies.txt` 读取
+- ✅ Cookie 验证成功后会自动保存/更新到文件
 
 ### 文件没有移动
 

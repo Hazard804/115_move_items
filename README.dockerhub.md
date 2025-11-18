@@ -33,11 +33,11 @@ services:
       # 必填：115网盘的Cookie
       - COOKIE=你的115网盘Cookie
       
-      # 必填：源目录路径（待检查的目录）
-      - SOURCE_PATH=/待处理/下载
+      # 多组路径映射（推荐）
+      - PATH_MAPPINGS=/待处理/下载->/已完成/视频,/临时/缓存->/归档/2024
       
-      # 必填：目标目录路径（文件移动到此目录）
-      - TARGET_PATH=/已完成/视频
+      # 排除特定后缀的文件
+      - EXCLUDE_EXTENSIONS=.txt,.nfo,.jpg,.png,.srt
       
       # 可选：检查间隔（分钟），默认5分钟
       - CHECK_INTERVAL=5
@@ -73,8 +73,8 @@ docker run -d \
   --restart unless-stopped \
   --network host \
   -e COOKIE='你的115网盘Cookie' \
-  -e SOURCE_PATH='/待处理/下载' \
-  -e TARGET_PATH='/已完成/视频' \
+  -e PATH_MAPPINGS='/待处理/下载->/已完成/视频,/临时/缓存->/归档/2024' \
+  -e EXCLUDE_EXTENSIONS='.txt,.nfo,.jpg,.png' \
   -e CHECK_INTERVAL=5 \
   -e MIN_FILE_SIZE=200MB \
   -e LOG_RETENTION_DAYS=7 \

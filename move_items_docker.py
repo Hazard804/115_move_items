@@ -349,15 +349,20 @@ def init_client_from_env():
     
     # 从环境变量读取cookie
     cookie_env = os.environ.get('COOKIE', '').strip()
+    cookie_source = None
     
-    if not cookie_env:
+    if cookie_env:
+        logger.info("📝 使用环境变量中的 Cookie")
+        cookie_source = "环境变量"
+    else:
         # 尝试从文件读取
         if os.path.exists(COOKIE_FILE):
-            logger.info(f"📂 从文件读取Cookie: {COOKIE_FILE}")
+            logger.info(f"📂 从持久化文件读取 Cookie: {COOKIE_FILE}")
             try:
                 with open(COOKIE_FILE, 'r', encoding='utf-8') as f:
                     cookie_env = f.read().strip()
                 logger.info("✓ Cookie 读取成功")
+                cookie_source = "持久化文件"
             except Exception as e:
                 logger.error(f"✗ 读取Cookie文件失败: {e}")
                 return None
@@ -426,9 +431,25 @@ def init_client_from_env():
         # 保存cookie到文件（用于下次重启）
         try:
             os.makedirs(DATA_DIR, exist_ok=True)
-            with open(COOKIE_FILE, 'w', encoding='utf-8') as f:
-                f.write(cookie_env)
-            logger.info(f"💾 Cookie已保存到 {COOKIE_FILE}")
+            
+            # 检查是否需要更新文件
+            need_update = True
+            if os.path.exists(COOKIE_FILE):
+                with open(COOKIE_FILE, 'r', encoding='utf-8') as f:
+                    old_cookie = f.read().strip()
+                if old_cookie == cookie_env:
+                    need_update = False
+            
+            if need_update:
+                with open(COOKIE_FILE, 'w', encoding='utf-8') as f:
+                    f.write(cookie_env)
+                if cookie_source == "环境变量":
+                    logger.info(f"💾 Cookie已更新并保存到 {COOKIE_FILE}")
+                    logger.info("   （环境变量中的新 Cookie 已覆盖旧文件）")
+                else:
+                    logger.info(f"💾 Cookie已保存到 {COOKIE_FILE}")
+            else:
+                logger.info(f"💾 Cookie文件无需更新")
         except Exception as e:
             logger.warning(f"⚠️  保存Cookie文件失败（不影响运行）: {e}")
         
