@@ -1,5 +1,5 @@
 # 115网盘文件移动工具 - Docker版本
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
