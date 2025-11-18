@@ -13,6 +13,10 @@ from datetime import datetime
 import re
 import os
 from logging.handlers import TimedRotatingFileHandler
+from functools import wraps
+import signal
+from contextlib import contextmanager
+import requests
 
 
 # 全局变量
@@ -21,6 +25,120 @@ logger = None
 LOG_DIR = "/app/logs"
 DATA_DIR = "/app/data"
 COOKIE_FILE = os.path.join(DATA_DIR, "115-cookies.txt")
+
+# 默认超时和重试配置
+DEFAULT_API_TIMEOUT = 120  # 默认120秒超时
+DEFAULT_API_RETRY_TIMES = 3  # 默认重试3次
+BARK_URL = None  # Bark通知URL
+
+
+class TimeoutError(Exception):
+    """超时异常"""
+    pass
+
+
+@contextmanager
+def timeout_handler(seconds):
+    """
+    超时上下文管理器（仅限Unix/Linux系统）
+    
+    参数:
+        seconds: 超时秒数
+    """
+    def timeout_signal_handler(signum, frame):
+        raise TimeoutError(f"操作超时 ({seconds}秒)")
+    
+    # Windows系统不支持signal.alarm，直接返回
+    if os.name == 'nt':
+        yield
+        return
+    
+    # 设置信号处理器
+    old_handler = signal.signal(signal.SIGALRM, timeout_signal_handler)
+    signal.alarm(seconds)
+    
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+
+def with_retry_and_timeout(max_retries=None, timeout_seconds=None, operation_name="操作"):
+    """
+    为函数添加超时和重试机制的装饰器
+    
+    参数:
+        max_retries: 最大重试次数，None表示使用全局配置
+        timeout_seconds: 超时秒数，None表示使用全局配置
+        operation_name: 操作名称，用于日志输出
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # 获取全局配置
+            retries = max_retries if max_retries is not None else DEFAULT_API_RETRY_TIMES
+            timeout = timeout_seconds if timeout_seconds is not None else DEFAULT_API_TIMEOUT
+            
+            last_error = None
+            
+            for attempt in range(retries):
+                try:
+                    # Windows系统直接执行，不使用信号超时
+                    if os.name == 'nt':
+                        return func(*args, **kwargs)
+                    
+                    # Unix/Linux系统使用信号超时
+                    with timeout_handler(timeout):
+                        return func(*args, **kwargs)
+                        
+                except TimeoutError as e:
+                    last_error = e
+                    if attempt < retries - 1:
+                        wait_time = (attempt + 1) * 2  # 递增等待时间
+                        logger.warning(f"⚠️  {operation_name}超时 (尝试 {attempt + 1}/{retries})，{wait_time}秒后重试...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ {operation_name}在 {retries} 次尝试后仍然超时")
+                        logger.error("💡 建议: 如果持续超时，可能是网络问题或Cookie已失效")
+                        logger.error("   1. 检查网络连接和代理设置")
+                        logger.error("   2. 尝试重新获取Cookie并更新配置")
+                        send_bark_notification(
+                            f"115自动移动失败: {operation_name}",
+                            f"操作超时({retries}次重试后仍失败)，请检查网络或Cookie",
+                            "timeSensitive"
+                        )
+                        
+                except Exception as e:
+                    last_error = e
+                    error_str = str(e).lower()
+                    
+                    # 检查是否是认证错误（不重试）
+                    if 'login' in error_str or 'auth' in error_str or 'cookie' in error_str:
+                        logger.error(f"❌ {operation_name}失败: 认证错误，不进行重试")
+                        raise
+                    
+                    # 其他错误进行重试
+                    if attempt < retries - 1:
+                        wait_time = (attempt + 1) * 2
+                        logger.warning(f"⚠️  {operation_name}失败 (尝试 {attempt + 1}/{retries}): {e}")
+                        logger.warning(f"   {wait_time}秒后重试...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ {operation_name}在 {retries} 次尝试后仍然失败: {e}")
+                        logger.error("💡 建议: 如果持续失败，可能是Cookie已失效")
+                        logger.error("   请尝试重新获取Cookie并更新配置")
+                        send_bark_notification(
+                            f"115自动移动失败: {operation_name}",
+                            f"操作失败({retries}次重试后): {str(e)[:100]}",
+                            "timeSensitive"
+                        )
+            
+            # 所有重试都失败
+            raise last_error
+        
+        return wrapper
+    return decorator
 
 
 def setup_logger(log_retention_days=7):
@@ -62,6 +180,30 @@ def setup_logger(log_retention_days=7):
     logger.addHandler(console_handler)
     
     return logger
+
+
+def send_bark_notification(title, content, level="passive"):
+    """
+    发送Bark通知
+    
+    参数:
+        title: 通知标题
+        content: 通知内容
+        level: 通知级别 (active/timeSensitive/passive)
+    """
+    if not BARK_URL:
+        return
+    
+    try:
+        # 组合完整的Bark URL
+        url = f"{BARK_URL.rstrip('/')}/{requests.utils.quote(title)}/{requests.utils.quote(content)}?level={level}"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            logger.info(f"📱 Bark通知已发送: {title}")
+        else:
+            logger.warning(f"⚠️  Bark通知发送失败: HTTP {response.status_code}")
+    except Exception as e:
+        logger.warning(f"⚠️  Bark通知发送异常: {e}")
 
 
 def parse_path_mappings(mappings_str):
@@ -226,7 +368,7 @@ def parse_file_size(size_str):
 
 def find_directory_by_path(path, start_cid=0):
     """
-    根据路径查找目录ID
+    根据路径查找目录ID（带超时和重试）
     
     参数:
         path: 目录路径，格式如 "/folder1/folder2/folder3"
@@ -258,15 +400,22 @@ def find_directory_by_path(path, start_cid=0):
         current_path = '/' + '/'.join(path_parts[:i+1])
         logger.info(f"  🔍 查找: {current_path}")
         
-        # 获取当前目录下的所有子目录
+        # 获取当前目录下的所有子目录（带超时和重试）
         found = False
         try:
-            for dir_info in iter_dirs(client=client, cid=current_cid, max_workers=0):
-                if dir_info.get('name') == folder_name:
-                    current_cid = dir_info.get('id')
-                    found = True
-                    logger.info(f"     ✓ 找到 (ID: {current_cid})")
-                    break
+            @with_retry_and_timeout(operation_name=f"扫描目录 {current_path}")
+            def scan_subdirs():
+                for dir_info in iter_dirs(client=client, cid=current_cid, max_workers=0):
+                    if dir_info.get('name') == folder_name:
+                        return dir_info.get('id')
+                return None
+            
+            result_cid = scan_subdirs()
+            if result_cid:
+                current_cid = result_cid
+                found = True
+                logger.info(f"     ✓ 找到 (ID: {current_cid})")
+                
         except Exception as e:
             logger.error(f"     ✗ 查询目录时出错: {e}")
             return None
@@ -299,7 +448,7 @@ def check_cookie_valid():
 
 def move_files(file_ids, target_pid=0):
     """
-    移动文件或目录到指定目录
+    移动文件或目录到指定目录（带重试机制）
     
     参数:
         file_ids: 文件或目录ID
@@ -308,7 +457,8 @@ def move_files(file_ids, target_pid=0):
     返回:
         dict: API 返回的结果
     """
-    try:
+    @with_retry_and_timeout(operation_name="移动文件")
+    def do_move():
         result = client.fs_move(file_ids, pid=target_pid)
         
         # 检查是否因为 Cookie 失效导致的错误
@@ -327,8 +477,13 @@ def move_files(file_ids, target_pid=0):
                 logger.error("  4. 重启容器: docker-compose restart")
                 logger.error("")
                 logger.error("=" * 80)
+                # 抛出异常以便上层识别为认证错误
+                raise Exception(f"Cookie失效: {error_msg}")
         
         return result
+    
+    try:
+        return do_move()
     except Exception as e:
         logger.error(f"移动文件时发生错误: {e}")
         return {'state': False, 'error': str(e)}
@@ -602,21 +757,25 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
                 logger.info("-" * 80)
                 
                 try:
-                    # 获取源目录中的文件
+                    # 获取源目录中的文件（带超时和重试）
                     logger.info(f"🔍 扫描源目录 (ID: {source_cid})...")
                     files_to_move = []
                     total_files = 0
                     excluded_files = 0
                     small_files = 0
                     
-                    try:
+                    @with_retry_and_timeout(operation_name=f"扫描文件列表 {source_path}")
+                    def scan_source_files():
+                        result = []
+                        stats = {'total': 0, 'excluded': 0, 'small': 0}
+                        
                         for file_info in iter_files(
                             client=client,
                             cid=source_cid,
                             cur=0,  # 遍历子目录树
                             page_size=1000
                         ):
-                            total_files += 1
+                            stats['total'] += 1
                             file_size = file_info.get('size', 0)
                             file_name = file_info.get('name', '')
                             file_id = file_info.get('id', '')
@@ -627,12 +786,12 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
                             
                             # 检查是否应该排除该文件
                             if should_exclude_file(file_name, exclude_extensions):
-                                excluded_files += 1
+                                stats['excluded'] += 1
                                 continue
                             
                             # 检查文件大小
                             if file_size >= min_size_bytes:
-                                files_to_move.append({
+                                result.append({
                                     'id': file_id,
                                     'name': file_name,
                                     'size': file_size,
@@ -641,7 +800,15 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
                                 })
                                 logger.info(f"  ✓ {display_path} ({format_file_size(file_size)})")
                             else:
-                                small_files += 1
+                                stats['small'] += 1
+                        
+                        return result, stats
+                    
+                    try:
+                        files_to_move, file_stats = scan_source_files()
+                        total_files = file_stats['total']
+                        excluded_files = file_stats['excluded']
+                        small_files = file_stats['small']
                     except Exception as e:
                         error_str = str(e).lower()
                         if 'login' in error_str or 'auth' in error_str or 'cookie' in error_str:
@@ -655,7 +822,10 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
                             logger.error("=" * 80)
                             return False
                         else:
-                            raise
+                            # 其他错误（包括超时）记录后继续处理下一个映射
+                            logger.error(f"❌ 扫描目录失败: {e}")
+                            logger.warning(f"⚠️  跳过此映射，继续处理下一个...")
+                            continue
                     
                     logger.info("")
                     logger.info(f"📊 扫描完成:")
@@ -755,6 +925,8 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
 def main():
     """主函数 - Docker版本"""
     
+    global DEFAULT_API_TIMEOUT, DEFAULT_API_RETRY_TIMES, BARK_URL
+    
     # 读取环境变量
     source_path = os.environ.get('SOURCE_PATH', '').strip()
     target_path = os.environ.get('TARGET_PATH', '').strip()
@@ -764,6 +936,16 @@ def main():
     min_file_size = os.environ.get('MIN_FILE_SIZE', '200MB').strip()
     log_retention_days = os.environ.get('LOG_RETENTION_DAYS', '7').strip()
     mode = os.environ.get('MODE', 'auto').strip().lower()
+    
+    # 读取超时和重试配置
+    api_timeout = os.environ.get('API_TIMEOUT', str(DEFAULT_API_TIMEOUT)).strip()
+    api_retry_times = os.environ.get('API_RETRY_TIMES', str(DEFAULT_API_RETRY_TIMES)).strip()
+    
+    # 读取Bark通知配置
+    bark_url = os.environ.get('BARK_URL', '').strip()
+    if bark_url:
+        BARK_URL = bark_url
+        logger.info(f"📱 Bark通知已启用")
     
     # 设置日志
     try:
@@ -782,6 +964,32 @@ def main():
     logger.info(f"📅 启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info(f"📝 日志保留: {log_days} 天")
     logger.info(f"🔧 运行模式: {mode}")
+    
+    # 解析和设置超时配置
+    try:
+        timeout_val = int(api_timeout)
+        if timeout_val < 10:
+            logger.warning(f"⚠️  API_TIMEOUT 值 {timeout_val} 秒过短，已调整为最小值 10 秒")
+            timeout_val = 10
+        DEFAULT_API_TIMEOUT = timeout_val
+        logger.info(f"⏱️  API超时: {DEFAULT_API_TIMEOUT} 秒")
+    except:
+        logger.warning(f"⚠️  API_TIMEOUT 值无效: {api_timeout}，使用默认值 {DEFAULT_API_TIMEOUT} 秒")
+    
+    # 解析和设置重试配置
+    try:
+        retry_val = int(api_retry_times)
+        if retry_val < 1:
+            logger.warning(f"⚠️  API_RETRY_TIMES 值 {retry_val} 过小，已调整为最小值 1")
+            retry_val = 1
+        elif retry_val > 10:
+            logger.warning(f"⚠️  API_RETRY_TIMES 值 {retry_val} 过大，已调整为最大值 10")
+            retry_val = 10
+        DEFAULT_API_RETRY_TIMES = retry_val
+        logger.info(f"🔄 API重试: {DEFAULT_API_RETRY_TIMES} 次")
+    except:
+        logger.warning(f"⚠️  API_RETRY_TIMES 值无效: {api_retry_times}，使用默认值 {DEFAULT_API_RETRY_TIMES} 次")
+    
     logger.info("=" * 80)
     
     # 解析路径映射

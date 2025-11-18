@@ -109,6 +109,9 @@ docker run -d \
 | `CHECK_INTERVAL` | ❌ | 5 | 检查间隔（分钟），最少2分钟 |
 | `MIN_FILE_SIZE` | ❌ | 200MB | 最小文件大小（KB/MB/GB/TB） |
 | `LOG_RETENTION_DAYS` | ❌ | 7 | 日志保留天数 |
+| `API_TIMEOUT` | ❌ | 120 | API请求超时时间（秒），最少10秒 |
+| `API_RETRY_TIMES` | ❌ | 3 | API请求失败重试次数（1-10次） |
+| `BARK_URL` | ❌ | - | Bark通知URL，仅失败时通知，格式: `https://api.day.app/你的key` |
 | `MODE` | ❌ | auto | 运行模式（目前只支持 auto） |
 | `TZ` | ❌ | Asia/Shanghai | 时区设置 |
 
@@ -173,6 +176,28 @@ environment:
   # 也可以不带点号
   - EXCLUDE_EXTENSIONS=txt,tmp,log
 ```
+
+### 🆕 Bark 失败通知
+
+使用 `BARK_URL` 可以在操作失败时接收推送通知（仅失败时通知）：
+
+```yaml
+environment:
+  # 配置 Bark 通知 URL
+  - BARK_URL=https://api.day.app/你的Bark密钥
+```
+
+**如何获取 Bark URL**：
+1. 在 iPhone/iPad 上下载安装 [Bark App](https://apps.apple.com/cn/app/bark/id1403753865)
+2. 打开 App，复制顶部显示的推送 URL
+3. URL 格式如: `https://api.day.app/xxxxxxxxxxxxx`
+
+**通知时机**：
+- ✅ 仅在以下情况发送通知：
+  - API 请求超时（重试3次后仍失败）
+  - API 请求错误（重试3次后仍失败）
+  - Cookie 失效检测
+- ❌ 正常运行时不会发送通知
 
 ### 单组映射（兼容旧版）
 
@@ -317,6 +342,31 @@ network_mode: host
 ```bash
 --network host
 ```
+
+### API 请求超时或频繁卡住
+
+**现象**：扫描目录时卡住，或者频繁出现超时错误
+
+**解决方案**：调整超时和重试配置
+
+```yaml
+environment:
+  # 增加超时时间（默认120秒）
+  - API_TIMEOUT=180
+  
+  # 增加重试次数（默认3次）
+  - API_RETRY_TIMES=5
+```
+
+**说明**：
+- `API_TIMEOUT`: 单次API请求的最大等待时间（秒），建议范围 10-120
+- `API_RETRY_TIMES`: API失败后的重试次数，建议范围 1-10
+- 程序会在每次重试之间自动增加等待时间
+- 超时的操作不会中断整个程序，会跳过继续处理下一个
+
+**注意**：
+- Windows 系统下超时机制基于网络库自身超时，可能不够精确
+- Linux/Unix 系统使用信号机制，超时控制更准确
 
 ### Cookie 失效
 

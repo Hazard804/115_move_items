@@ -98,6 +98,9 @@ docker run -d \
 | `CHECK_INTERVAL` | ❌ | 5 | 检查间隔（分钟） |
 | `MIN_FILE_SIZE` | ❌ | 200MB | 最小文件大小 |
 | `LOG_RETENTION_DAYS` | ❌ | 7 | 日志保留天数 |
+| `API_TIMEOUT` | ❌ | 120 | API超时（秒） |
+| `API_RETRY_TIMES` | ❌ | 3 | API重试次数 |
+| `BARK_URL` | ❌ | - | Bark通知URL |
 | `TZ` | ❌ | Asia/Shanghai | 时区 |
 
 ### 🆕 多组路径映射
@@ -118,6 +121,17 @@ environment:
 environment:
   - EXCLUDE_EXTENSIONS=.txt,.nfo,.jpg,.png
 ```
+
+### 🆕 Bark 失败通知
+
+在操作失败时接收 iPhone 推送通知：
+
+```yaml
+environment:
+  - BARK_URL=https://api.day.app/你的Bark密钥
+```
+
+**说明**: 仅在 API 超时、请求失败或 Cookie 失效时发送通知，正常运行不打扰。
 
 ### 获取 115网盘 Cookie
 
@@ -189,6 +203,22 @@ cat logs/move_items_20241118.log
 **原因**：使用了全局代理，Docker 容器无法正确访问网络
 
 **解决方案**：添加 `network_mode: host` 或 `--network host`
+
+### API 请求超时
+
+**现象**：扫描目录时卡住或频繁超时
+
+**解决方案**：调整超时和重试配置
+
+```yaml
+environment:
+  - API_TIMEOUT=180        # 增加超时时间（默认120秒）
+  - API_RETRY_TIMES=5     # 增加重试次数（默认3次）
+```
+
+**说明**：
+- 程序会在每次重试之间自动增加等待时间
+- 超时的操作会跳过，不会中断整个程序
 
 ### Cookie 失效
 
