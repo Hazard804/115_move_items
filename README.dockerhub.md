@@ -192,11 +192,12 @@ cat logs/move_items_20241118.log
 
 ### Cookie 失效
 
-重新获取 Cookie，更新环境变量，然后重启容器：
+程序会**自动检测 Cookie 失效**并提示更新：
 
-```bash
-docker restart 115_move_items
-```
+**更新步骤**：
+1. 重新登录 115.com 获取新 Cookie
+2. 修改 docker-compose.yml 中的 COOKIE
+3. 重启容器：`docker-compose restart`
 
 ### 文件没有移动
 

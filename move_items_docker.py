@@ -279,6 +279,24 @@ def find_directory_by_path(path, start_cid=0):
     return current_cid
 
 
+def check_cookie_valid():
+    """
+    检查 Cookie 是否仍然有效
+    
+    返回:
+        bool: True 表示有效，False 表示失效
+    """
+    try:
+        user_info = client.user_info()
+        if user_info and user_info.get('state'):
+            return True
+        else:
+            return False
+    except Exception as e:
+        logger.error(f"检查 Cookie 状态时出错: {e}")
+        return False
+
+
 def move_files(file_ids, target_pid=0):
     """
     移动文件或目录到指定目录
@@ -292,6 +310,24 @@ def move_files(file_ids, target_pid=0):
     """
     try:
         result = client.fs_move(file_ids, pid=target_pid)
+        
+        # 检查是否因为 Cookie 失效导致的错误
+        if not result.get('state'):
+            error_msg = result.get('error', result.get('error_msg', ''))
+            # 常见的认证失败错误码或消息
+            if 'login' in error_msg.lower() or 'auth' in error_msg.lower() or result.get('errno') == 99:
+                logger.error("=" * 80)
+                logger.error("❌ 检测到 Cookie 可能已失效！")
+                logger.error("=" * 80)
+                logger.error("")
+                logger.error("请执行以下步骤更新 Cookie：")
+                logger.error("  1. 访问 https://115.com 重新登录")
+                logger.error("  2. 按 F12 打开开发者工具获取新的 Cookie")
+                logger.error("  3. 更新 docker-compose.yml 中的 COOKIE 环境变量")
+                logger.error("  4. 重启容器: docker-compose restart")
+                logger.error("")
+                logger.error("=" * 80)
+        
         return result
     except Exception as e:
         logger.error(f"移动文件时发生错误: {e}")
@@ -490,10 +526,37 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
     interval_seconds = interval_minutes * 60
     total_moved = 0
     total_failed = 0
+    cookie_check_interval = 10  # 每10轮检查一次 Cookie
     
     try:
         while True:
             run_count += 1
+            
+            # 定期检查 Cookie 是否有效
+            if run_count % cookie_check_interval == 1 and run_count > 1:
+                logger.info("")
+                logger.info("🔐 定期检查 Cookie 状态...")
+                if not check_cookie_valid():
+                    logger.error("")
+                    logger.error("=" * 80)
+                    logger.error("❌ Cookie 已失效！程序将停止运行")
+                    logger.error("=" * 80)
+                    logger.error("")
+                    logger.error("请执行以下步骤更新 Cookie：")
+                    logger.error("  1. 访问 https://115.com 重新登录")
+                    logger.error("  2. 按 F12 打开开发者工具")
+                    logger.error("  3. 切换到 Network 标签，刷新页面")
+                    logger.error("  4. 找到任意请求，复制 Cookie 值")
+                    logger.error("  5. 更新环境变量:")
+                    logger.error("     - 修改 docker-compose.yml 中的 COOKIE")
+                    logger.error("     - 或删除 data/115-cookies.txt 并重启容器")
+                    logger.error("  6. 重启容器: docker-compose restart")
+                    logger.error("")
+                    logger.error("=" * 80)
+                    return False
+                else:
+                    logger.info("✅ Cookie 状态正常")
+            
             logger.info("")
             logger.info("=" * 80)
             logger.info(f"🔄 第 {run_count} 次检查开始")
@@ -525,38 +588,53 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
                     excluded_files = 0
                     small_files = 0
                     
-                    for file_info in iter_files(
-                        client=client,
-                        cid=source_cid,
-                        cur=0,  # 遍历子目录树
-                        page_size=1000
-                    ):
-                        total_files += 1
-                        file_size = file_info.get('size', 0)
-                        file_name = file_info.get('name', '')
-                        file_id = file_info.get('id', '')
-                        file_path = file_info.get('path', '')
-                        
-                        # 如果path为空，使用name作为显示
-                        display_path = file_path if file_path else file_name
-                        
-                        # 检查是否应该排除该文件
-                        if should_exclude_file(file_name, exclude_extensions):
-                            excluded_files += 1
-                            continue
-                        
-                        # 检查文件大小
-                        if file_size >= min_size_bytes:
-                            files_to_move.append({
-                                'id': file_id,
-                                'name': file_name,
-                                'size': file_size,
-                                'path': file_path,
-                                'display_path': display_path
-                            })
-                            logger.info(f"  ✓ {display_path} ({format_file_size(file_size)})")
+                    try:
+                        for file_info in iter_files(
+                            client=client,
+                            cid=source_cid,
+                            cur=0,  # 遍历子目录树
+                            page_size=1000
+                        ):
+                            total_files += 1
+                            file_size = file_info.get('size', 0)
+                            file_name = file_info.get('name', '')
+                            file_id = file_info.get('id', '')
+                            file_path = file_info.get('path', '')
+                            
+                            # 如果path为空，使用name作为显示
+                            display_path = file_path if file_path else file_name
+                            
+                            # 检查是否应该排除该文件
+                            if should_exclude_file(file_name, exclude_extensions):
+                                excluded_files += 1
+                                continue
+                            
+                            # 检查文件大小
+                            if file_size >= min_size_bytes:
+                                files_to_move.append({
+                                    'id': file_id,
+                                    'name': file_name,
+                                    'size': file_size,
+                                    'path': file_path,
+                                    'display_path': display_path
+                                })
+                                logger.info(f"  ✓ {display_path} ({format_file_size(file_size)})")
+                            else:
+                                small_files += 1
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        if 'login' in error_str or 'auth' in error_str or 'cookie' in error_str:
+                            logger.error("")
+                            logger.error("=" * 80)
+                            logger.error("❌ 扫描文件时检测到 Cookie 已失效！")
+                            logger.error("=" * 80)
+                            logger.error("")
+                            logger.error("请立即更新 Cookie 并重启容器")
+                            logger.error("详细步骤请查看上方日志")
+                            logger.error("=" * 80)
+                            return False
                         else:
-                            small_files += 1
+                            raise
                     
                     logger.info("")
                     logger.info(f"📊 扫描完成:")

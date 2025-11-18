@@ -316,14 +316,24 @@ network_mode: host
 
 ### Cookie 失效
 
-如果出现认证错误：
-1. 重新获取 Cookie
-2. 更新环境变量
-3. 重启容器
+程序会**自动检测 Cookie 是否失效**：
+- 每10轮检查会验证一次 Cookie 状态
+- 移动文件时如果遇到认证错误会立即提醒
+- 发现 Cookie 失效后程序会停止并提示更新步骤
+
+**更新 Cookie 的步骤**：
+
+1. 重新获取 Cookie（见上面的获取方法）
+2. 更新配置：
 
 ```bash
-# 修改 docker-compose.yml 中的 COOKIE
-# 然后重启
+# 方式1：修改 docker-compose.yml
+vim docker-compose.yml  # 更新 COOKIE 环境变量
+docker-compose restart
+
+# 方式2：删除旧 Cookie 文件
+rm data/115-cookies.txt
+# 然后修改 docker-compose.yml 并重启
 docker-compose restart
 ```
 
