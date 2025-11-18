@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 # 复制源代码
 COPY move_items.py .
+COPY move_items_docker.py .
 COPY README.md .
 
 # 创建日志目录和数据目录

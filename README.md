@@ -22,7 +22,7 @@ version: '3.8'
 
 services:
   move_items:
-    image: hazard804/115-move-items:latest
+    image: hazard084/115-move-items:latest
     container_name: 115_move_items
     restart: unless-stopped
     environment:
@@ -86,7 +86,7 @@ docker run -d \
   -e TZ=Asia/Shanghai \
   -v $(pwd)/logs:/app/logs \
   -v $(pwd)/data:/app/data \
-  hazard804/115-move-items:latest
+  hazard084/115-move-items:latest
 ```
 
 ## 📋 配置说明
@@ -158,7 +158,7 @@ docker restart 115_move_items
 
 ```bash
 # 拉取最新镜像
-docker pull hazard804/115-move-items:latest
+docker pull hazard084/115-move-items:latest
 
 # 重新创建容器
 docker-compose up -d
