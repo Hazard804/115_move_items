@@ -968,15 +968,9 @@ def main():
     
     # 读取Bark通知配置
     bark_url = os.environ.get('BARK_URL', '').strip()
-    if bark_url:
-        BARK_URL = bark_url
-        logger.info(f"📱 Bark通知已启用")
     
     # 读取回调URL配置
     callback_url = os.environ.get('CALLBACK_URL', '').strip()
-    if callback_url:
-        CALLBACK_URL = callback_url
-        logger.info(f"🔔 文件移动回调已启用: {CALLBACK_URL}")
     
     # 设置日志
     try:
@@ -987,6 +981,15 @@ def main():
         log_days = 7
     
     setup_logger(log_days)
+    
+    # 设置全局变量（在logger初始化之后）
+    if bark_url:
+        BARK_URL = bark_url
+        logger.info(f"📱 Bark通知已启用")
+    
+    if callback_url:
+        CALLBACK_URL = callback_url
+        logger.info(f"🔔 文件移动回调已启用: {CALLBACK_URL}")
     
     logger.info("")
     logger.info("=" * 80)
