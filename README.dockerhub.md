@@ -101,6 +101,7 @@ docker run -d \
 | `API_TIMEOUT` | ❌ | 120 | API超时（秒） |
 | `API_RETRY_TIMES` | ❌ | 3 | API重试次数 |
 | `BARK_URL` | ❌ | - | Bark通知URL |
+| `CALLBACK_URL` | ❌ | - | 文件移动回调URL |
 | `TZ` | ❌ | Asia/Shanghai | 时区 |
 
 ### 🆕 多组路径映射
@@ -132,6 +133,17 @@ environment:
 ```
 
 **说明**: 仅在 API 超时、请求失败或 Cookie 失效时发送通知，正常运行不打扰。
+
+### 🆕 文件移动回调
+
+在有文件移动后触发外部系统刷新：
+
+```yaml
+environment:
+  - CALLBACK_URL=http://192.168.0.106:9537/api/sync/lift_by_token?token=xxx&type=lift_sync
+```
+
+**说明**: 每轮定时任务完成后，如果有文件成功移动，则访问此URL。常用于通知Emby/Jellyfin等媒体库刷新。
 
 ### 获取 115网盘 Cookie
 

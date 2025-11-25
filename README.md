@@ -112,6 +112,7 @@ docker run -d \
 | `API_TIMEOUT` | ❌ | 120 | API请求超时时间（秒），最少10秒 |
 | `API_RETRY_TIMES` | ❌ | 3 | API请求失败重试次数（1-10次） |
 | `BARK_URL` | ❌ | - | Bark通知URL，仅失败时通知，格式: `https://api.day.app/你的key` |
+| `CALLBACK_URL` | ❌ | - | 文件移动后的回调URL，用于触发外部系统刷新 |
 | `MODE` | ❌ | auto | 运行模式（目前只支持 auto） |
 | `TZ` | ❌ | Asia/Shanghai | 时区设置 |
 
@@ -198,6 +199,47 @@ environment:
   - API 请求错误（重试3次后仍失败）
   - Cookie 失效检测
 - ❌ 正常运行时不会发送通知
+
+### 🆕 文件移动回调
+
+使用 `CALLBACK_URL` 可以在每次定时任务有文件移动后触发外部系统刷新：
+
+```yaml
+environment:
+  # 配置回调 URL
+  - CALLBACK_URL=http://192.168.0.106:9537/api/sync/lift_by_token?token=cloud_media_sync&type=lift_sync
+```
+
+**使用场景**：
+- 通知 Emby/Jellyfin/Plex 媒体库刷新
+- 触发其他自动化工具执行
+- 同步文件列表到其他系统
+
+**触发时机**：
+- ✅ 每轮定时任务完成后，如果有文件成功移动，则访问回调URL
+- ❌ 如果本轮没有移动任何文件，不会触发回调
+
+**示例配置**：
+
+```yaml
+version: '3.8'
+
+services:
+  move_items:
+    image: hazard084/115-move-items:latest
+    container_name: 115_move_items
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - COOKIE=你的115Cookie
+      - PATH_MAPPINGS=/待处理/下载->/已完成/视频
+      
+      # 文件移动后触发Emby刷新
+      - CALLBACK_URL=http://192.168.1.100:8096/emby/Library/Refresh
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+```
 
 ### 单组映射（兼容旧版）
 

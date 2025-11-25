@@ -30,6 +30,7 @@ COOKIE_FILE = os.path.join(DATA_DIR, "115-cookies.txt")
 DEFAULT_API_TIMEOUT = 120  # 默认120秒超时
 DEFAULT_API_RETRY_TIMES = 3  # 默认重试3次
 BARK_URL = None  # Bark通知URL
+CALLBACK_URL = None  # 文件移动后的回调URL
 
 
 class TimeoutError(Exception):
@@ -204,6 +205,26 @@ def send_bark_notification(title, content, level="passive"):
             logger.warning(f"⚠️  Bark通知发送失败: HTTP {response.status_code}")
     except Exception as e:
         logger.warning(f"⚠️  Bark通知发送异常: {e}")
+
+
+def trigger_callback():
+    """
+    触发回调URL，用于通知外部系统文件已移动
+    """
+    if not CALLBACK_URL:
+        return
+    
+    try:
+        logger.info(f"🔔 正在触发回调: {CALLBACK_URL}")
+        response = requests.get(CALLBACK_URL, timeout=10)
+        if response.status_code == 200:
+            logger.info(f"✅ 回调成功: HTTP {response.status_code}")
+        else:
+            logger.warning(f"⚠️  回调返回非200: HTTP {response.status_code}")
+    except requests.exceptions.Timeout:
+        logger.warning(f"⚠️  回调超时: {CALLBACK_URL}")
+    except Exception as e:
+        logger.warning(f"⚠️  回调失败: {e}")
 
 
 def parse_path_mappings(mappings_str):
@@ -891,6 +912,10 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
             logger.info(f"📊 本轮统计: ✅ 移动 {round_moved} 个 | ❌ 失败 {round_failed} 个")
             logger.info(f"📊 总计统计: ✅ 已移动 {total_moved} 个 | ❌ 失败 {total_failed} 个")
             
+            # 如果本轮有文件移动，触发回调
+            if round_moved > 0:
+                trigger_callback()
+            
             # 等待下一次检查
             next_check_time = datetime.now().timestamp() + interval_seconds
             next_check_str = datetime.fromtimestamp(next_check_time).strftime('%Y-%m-%d %H:%M:%S')
@@ -925,7 +950,7 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
 def main():
     """主函数 - Docker版本"""
     
-    global DEFAULT_API_TIMEOUT, DEFAULT_API_RETRY_TIMES, BARK_URL
+    global DEFAULT_API_TIMEOUT, DEFAULT_API_RETRY_TIMES, BARK_URL, CALLBACK_URL
     
     # 读取环境变量
     source_path = os.environ.get('SOURCE_PATH', '').strip()
@@ -946,6 +971,12 @@ def main():
     if bark_url:
         BARK_URL = bark_url
         logger.info(f"📱 Bark通知已启用")
+    
+    # 读取回调URL配置
+    callback_url = os.environ.get('CALLBACK_URL', '').strip()
+    if callback_url:
+        CALLBACK_URL = callback_url
+        logger.info(f"🔔 文件移动回调已启用: {CALLBACK_URL}")
     
     # 设置日志
     try:
