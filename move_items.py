@@ -256,7 +256,8 @@ def list_directory_tree(cid=0, cur=0, order="user_ptime", asc=1, file_type=99):
         order=order,
         asc=asc,
         cur=cur,
-        page_size=1000  # 每页获取1000个文件
+        page_size=1000,  # 每页获取1000个文件
+        **get_ios_ua_app(),
     ):
         file_count += 1
         files_list.append(file_info)
@@ -770,7 +771,8 @@ def auto_move_files_task(source_path, target_path, interval_minutes, min_size_by
                     client=client,
                     cid=source_cid,
                     cur=0,  # 遍历子目录树
-                    page_size=1000
+                    page_size=1000,
+                    **get_ios_ua_app(),
                 ):
                     total_files += 1
                     file_size = file_info.get('size', 0)

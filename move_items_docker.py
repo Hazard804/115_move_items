@@ -813,7 +813,8 @@ def auto_move_files_task(path_mappings, interval_minutes, min_size_bytes, exclud
                             client=client,
                             cid=source_cid,
                             cur=0,  # 遍历子目录树
-                            page_size=1000
+                            page_size=1000,
+                            **get_ios_ua_app(),
                         ):
                             stats['total'] += 1
                             file_size = file_info.get('size', 0)
