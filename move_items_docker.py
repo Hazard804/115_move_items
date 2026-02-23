@@ -17,6 +17,7 @@ from functools import wraps
 import signal
 from contextlib import contextmanager
 import requests
+from typing import Dict
 
 
 # 全局变量
@@ -25,6 +26,22 @@ logger = None
 LOG_DIR = "/app/logs"
 DATA_DIR = "/app/data"
 COOKIE_FILE = os.path.join(DATA_DIR, "115-cookies.txt")
+
+# iOS UA 配置
+IOS_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 115wangpan_ios/36.2.20"
+)
+
+
+def get_ios_ua_app() -> Dict[str, str]:
+    """
+    获取 IOS 设备的 header（UA）和 APP
+    """
+    return {
+        "headers": {"user-agent": IOS_UA},
+        "app": "ios",
+    }
 
 # 默认超时和重试配置
 DEFAULT_API_TIMEOUT = 120  # 默认120秒超时
@@ -426,7 +443,9 @@ def find_directory_by_path(path, start_cid=0):
         try:
             @with_retry_and_timeout(operation_name=f"扫描目录 {current_path}")
             def scan_subdirs():
-                for dir_info in iter_dirs(client=client, cid=current_cid, max_workers=0):
+                for dir_info in iter_dirs(
+                    client=client, cid=current_cid, max_workers=0, **get_ios_ua_app()
+                ):
                     if dir_info.get('name') == folder_name:
                         return dir_info.get('id')
                 return None

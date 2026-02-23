@@ -8,6 +8,7 @@ from datetime import datetime
 import re
 import os
 from logging.handlers import TimedRotatingFileHandler
+from typing import Dict
 
 
 # 全局变量
@@ -15,6 +16,22 @@ client = None
 logger = None
 COOKIE_FILE = "115-cookies.txt"
 LOG_DIR = "logs"
+
+# iOS UA 配置
+IOS_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 115wangpan_ios/36.2.20"
+)
+
+
+def get_ios_ua_app() -> Dict[str, str]:
+    """
+    获取 IOS 设备的 header（UA）和 APP
+    """
+    return {
+        "headers": {"user-agent": IOS_UA},
+        "app": "ios",
+    }
 
 
 def setup_logger(log_retention_days=7):
@@ -109,7 +126,9 @@ def test_cookie(cookie_str):
         # 尝试遍历根目录的文件夹
         print("正在获取根目录信息...")
         dir_count = 0
-        for dir_info in iter_dirs(client=test_client, cid=0, max_workers=0):
+        for dir_info in iter_dirs(
+            client=test_client, cid=0, max_workers=0, **get_ios_ua_app()
+        ):
             dir_count += 1
             if dir_count >= 3:  # 只获取前3个就够了
                 break
@@ -274,13 +293,13 @@ def format_file_size(size):
         return f"{size / (1024 ** 3):.2f} GB"
 
 
-def list_directories(cid=0, app='android', max_dirs=0):
+def list_directories(cid=0, app='ios', max_dirs=0):
     """
     列举指定目录下的所有子目录
     
     参数:
         cid: 目录 id，默认为 0（根目录）
-        app: 使用指定 app（设备）的接口，默认为 'android'
+        app: 使用指定 app（设备）的接口，默认为 'ios'
         max_dirs: 估计最大存在的目录数，<= 0 时则无限，默认为 0
     
     返回:
@@ -297,7 +316,8 @@ def list_directories(cid=0, app='android', max_dirs=0):
         cid=cid,
         app=app,
         max_dirs=max_dirs,
-        max_workers=0  # 单工作者惰性执行
+        max_workers=0,  # 单工作者惰性执行
+        **get_ios_ua_app() if app == 'ios' else {},
     ):
         dir_count += 1
         dirs_list.append(dir_info)
@@ -319,13 +339,13 @@ def list_directories(cid=0, app='android', max_dirs=0):
     return dirs_list
 
 
-def list_directories_tree(cid=0, app='android', max_depth=None):
+def list_directories_tree(cid=0, app='ios', max_depth=None):
     """
     以树状结构列举目录树
     
     参数:
         cid: 目录 id，默认为 0（根目录）
-        app: 使用指定 app（设备）的接口，默认为 'android'
+        app: 使用指定 app（设备）的接口，默认为 'ios'
         max_depth: 最大遍历深度，None 表示无限制
     
     返回:
@@ -340,7 +360,8 @@ def list_directories_tree(cid=0, app='android', max_depth=None):
         client=client,
         cid=cid,
         app=app,
-        max_workers=0
+        max_workers=0,
+        **get_ios_ua_app() if app == 'ios' else {},
     ):
         all_dirs.append(dir_info)
         dir_id = dir_info.get('id')
@@ -408,14 +429,14 @@ def move_files(file_ids, target_pid=0, use_app_api=False):
         target_pid: 目标目录ID，默认为 0（根目录）
         use_app_api: 是否使用 app 接口（默认使用 web 接口）
                     - False: 使用 fs_move (web接口)
-                    - True: 使用 fs_move_app (android接口)
+                    - True: 使用 fs_move_app (iOS接口)
     
     返回:
         dict: API 返回的结果
     """
     try:
         if use_app_api:
-            # 使用 app 接口 (fs_move_app)
+            # 使用 app 接口 (fs_move_app) - iOS 接口
             # 需要将 file_ids 转换为逗号分隔的字符串
             if isinstance(file_ids, (list, tuple)):
                 ids_str = ','.join(str(fid) for fid in file_ids)
@@ -427,7 +448,7 @@ def move_files(file_ids, target_pid=0, use_app_api=False):
                 'to_cid': target_pid
             }
             
-            result = client.fs_move_app(payload, pid=target_pid, app='android')
+            result = client.fs_move_app(payload, pid=target_pid, **get_ios_ua_app())
         else:
             # 使用 web 接口 (fs_move)
             # payload 可以是单个ID、ID列表或字典
@@ -518,7 +539,9 @@ def find_directory_by_path(path, start_cid=0):
         
         # 获取当前目录下的所有子目录
         found = False
-        for dir_info in iter_dirs(client=client, cid=current_cid, max_workers=0):
+        for dir_info in iter_dirs(
+            client=client, cid=current_cid, max_workers=0, **get_ios_ua_app()
+        ):
             if dir_info.get('name') == folder_name:
                 current_cid = dir_info.get('id')
                 found = True
